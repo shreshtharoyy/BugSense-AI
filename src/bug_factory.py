@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
-from bug_report import BugReport
+from src.bug_report import BugReport
 
 class BugFactory:
     @staticmethod
