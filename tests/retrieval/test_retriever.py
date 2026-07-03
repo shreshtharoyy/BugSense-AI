@@ -10,10 +10,6 @@ def main():
     embedder = TextEmbedder()
     store = ChromaStore()
 
-    # -------------------------
-    # Create sample bugs
-    # -------------------------
-
     bug_descriptions = [
         "Login button crashes after clicking",
         "Logout button freezes on homepage",
@@ -23,10 +19,11 @@ def main():
     for description in bug_descriptions:
 
         bug = BugFactory.create(
-            screenshot_path=None,
-            description=description,
-            error_log="Test Error Log",
-        )
+        title=description,
+        description=description,
+        error_log="Test Error Log",
+        screenshot_path=None,
+    )
 
         bug = Preprocessor.process(bug)
 
@@ -38,10 +35,6 @@ def main():
             document=bug.description,
             metadata={"source": "test"},
         )
-
-    # -------------------------
-    # Query
-    # -------------------------
 
     query = "Login page crashes"
 
@@ -62,8 +55,16 @@ def main():
     print(results)
     print(type(results))
 
-    for i, document in enumerate(results["documents"][0], start=1):
-        print(f"{i}. {document}")
+    if results is None:
+        raise RuntimeError("Retriever returned no results.")
+
+    documents = results.get("documents", [])
+
+    if documents:
+        for i, document in enumerate(documents[0], start=1):
+            print(f"{i}. {document}")
+    else:
+        print("No documents retrieved.")
 
     print("=" * 60)
 
