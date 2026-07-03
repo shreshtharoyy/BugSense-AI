@@ -22,3 +22,6 @@ logs/
 
 # Temporary Files
 temp/
+
+# Downloaded datasets
+dataset/gitbugs/
