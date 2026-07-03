@@ -6,3 +6,5 @@ transformers
 numpy
 pandas
 sentence-transformers
+chromadb
+kaggle
