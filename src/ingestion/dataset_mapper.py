@@ -21,12 +21,18 @@ class DatasetMapper:
             resolution = str(resolution_value)
         else:
             resolution = None
+
+        description = (
+            str(row["Description"])
+            if pd.notna(row["Description"])
+            else ""
+        )
        
         return BugFactory.create(
             bug_id=str(row["Issue id"]),
             title=row["Summary"],
-            description=row["Description"],
-            error_log=row["Description"],      
+            description=description,
+            error_log=description,      
             created_at=created_at,
             resolved_at=resolved_at,
             resolution=resolution,
