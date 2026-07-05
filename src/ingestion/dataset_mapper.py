@@ -14,7 +14,14 @@ class DatasetMapper:
             resolved_at = datetime.fromisoformat(str(resolved_value))
         else:
             resolved_at = None
-        
+
+        resolution_value = row["Resolution"]
+
+        if pd.notna(resolution_value):
+            resolution = str(resolution_value)
+        else:
+            resolution = None
+       
         return BugFactory.create(
             bug_id=str(row["Issue id"]),
             title=row["Summary"],
@@ -22,6 +29,6 @@ class DatasetMapper:
             error_log=row["Description"],      
             created_at=created_at,
             resolved_at=resolved_at,
-            resolution=row.get("Resolution"),
+            resolution=resolution,
             project=project,
         )
