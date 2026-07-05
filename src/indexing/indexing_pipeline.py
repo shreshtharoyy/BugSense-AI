@@ -9,7 +9,8 @@ class IndexingPipeline:
         self.store=ChromaStore()
 
     def index(self, bugs: list[BugReport])->None:
-        for bug in bugs:
+        total = len(bugs)
+        for index, bug in enumerate(bugs, start=1):
             processed_bug = Preprocessor.process(bug)
             embedding = self.embedder.encode(processed_bug.description)
             self.store.add(
@@ -22,4 +23,4 @@ class IndexingPipeline:
                     "resolution": processed_bug.resolution or "",
                 }, 
             )
-
+            print(f"Indexed {index}/{total} bug reports", end="\r")
