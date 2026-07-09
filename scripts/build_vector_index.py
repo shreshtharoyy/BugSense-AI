@@ -8,7 +8,7 @@ project_name = ["firefox"]
 
 def main():
     pipeline = IndexingPipeline()
-    total_bugs = 0
+    total_indexed = 0
 
     print("Building BugSense vector index")
 
