@@ -6,68 +6,42 @@ from src.retrieval.retriever import Retriever
 
 
 def main():
-
-    embedder = TextEmbedder()
     store = ChromaStore()
-
-    bug_descriptions = [
-        "Login button crashes after clicking",
-        "Logout button freezes on homepage",
-        "Payment gateway timeout during checkout",
-    ]
-
-    for description in bug_descriptions:
-
-        bug = BugFactory.create(
-        title=description,
-        description=description,
-        error_log="Test Error Log",
+    embedder = TextEmbedder()
+    retriever = Retriever(store)
+    
+    query_bug = BugFactory.create(
+        title="Login Crash",
+        description="The application crashes when attempting to log in with valid credentials.",
+        error_log="NS_ERROR_FAILURE",
         screenshot_path=None,
     )
+    
+    query_bug = Preprocessor.process(query_bug)
+    query_text = f"""Title: {query_bug.title}. Description: {query_bug.description}. Error Log: {query_bug.error_log}""".strip()
+    query_embedding = embedder.encode(query_text)
+    
+    results = retriever.retrieve(query_embedding, top_k=5)
+    
+    print(f"Query {query_text} \n")
+    ids = results.get("ids", [[]])[0]
+    documents = results.get("documents", [[]])[0]
+    metadatas = results.get("metadatas", [[]])[0]
+    distances = results.get("distances", [[]])[0]
 
-        bug = Preprocessor.process(bug)
-
-        embedding = embedder.encode(bug.description)
-
-        store.add(
-            bug_id=bug.bug_id,
-            embedding=embedding.tolist(),
-            document=bug.description,
-            metadata={"source": "test"},
-        )
-
-    query = "Login page crashes"
-
-    query_embedding = embedder.encode(query)
-
-    retriever = Retriever(store)
-
-    results = retriever.retrieve(
-        query_embedding,
-        top_k=3,
-    )
-
-    print("=" * 60)
-    print("Query:")
-    print(query)
-
-    print("\nRetrieved Documents:")
-    print(results)
-    print(type(results))
-
-    if results is None:
-        raise RuntimeError("Retriever returned no results.")
-
-    documents = results.get("documents", [])
-
-    if documents:
-        for i, document in enumerate(documents[0], start=1):
-            print(f"{i}. {document}")
-    else:
-        print("No documents retrieved.")
-
-    print("=" * 60)
-
+    for i, (bug_id, doc, meta, distance) in enumerate(zip(ids, documents, metadatas, distances),start=1,):
+        similarity = 1 - distance
+        print(f"Rank       : {i}")
+        print(f"Bug ID     : {bug_id}")
+        # print(f"Distance   : {distance:.4f}")
+        print(f"Similarity : {similarity:.2%}")
+        print(f"Project    : {meta.get('project')}")
+        print(f"Title      : {meta.get('title')}")
+        print(f"Resolution : {meta.get('resolution')}")
+        print(f"Created At : {meta.get('created_at')}")
+        print(f"Resolved At: {meta.get('resolved_at')} \n")
+        print("Retrieved Document")
+        print(f"{doc}\n")
 
 if __name__ == "__main__":
     main()
