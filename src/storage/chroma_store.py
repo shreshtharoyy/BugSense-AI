@@ -23,6 +23,9 @@ class ChromaStore:
                     "title": bug.title or "",
                     "project": bug.project or "",
                     "resolution": bug.resolution or "",
+                    "created_at": bug.created_at or "",
+                    "resolved_at": bug.resolved_at or "",
+                    "screenshot_path": bug.screenshot_path or "",
                 }
             )
 
