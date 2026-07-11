@@ -9,4 +9,9 @@ for project in projects:
 
     csv_path = dataset_root / project / f"{project}_bugs.csv"
     df = pd.read_csv(csv_path)
-    print(f"Shape {df.shape}, Info {df.info()}, Missing values {df.isna().sum()}, Data types {df.dtypes} \n")
+
+    # df.info() prints as a side effect and returns None, so it cannot be interpolated.
+    print(f"Shape {df.shape}")
+    df.info()
+    print(f"\nMissing values\n{df.isna().sum()}")
+    print(f"\nData types\n{df.dtypes}\n")
