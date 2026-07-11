@@ -1,45 +1,33 @@
-from pathlib import Path
+import numpy as np
 
-from src.bug_factory import BugFactory
-from src.preprocessing.preprocessor import Preprocessor
-from src.embeddings.text_embedder import TextEmbedder
+from src.config import BGE_QUERY_PREFIX
 
 
-def main():
+def test_encode_documents_returns_matrix(embedder):
+    embeddings = embedder.encode_documents(["first bug", "second bug"])
+    assert embeddings.shape == (2, 384)
 
-    bug = BugFactory.create(
-        screenshot_path=None,
-        description="""
-            Login      button      crashes
-            after clicking.
-        """,
-        error_log="""
-            java.lang.NullPointerException
 
-            at LoginService.java:45
-        """,
+def test_encode_query_returns_vector(embedder):
+    # The old encode() returned (384,) for a str and (N, 384) for a list; callers
+    # silently depended on which they passed.
+    assert embedder.encode_query("login crash").shape == (384,)
+
+
+def test_embeddings_are_normalized(embedder):
+    vector = embedder.encode_query("login crash")
+    assert np.linalg.norm(vector) == np.float32(1.0).item() or np.isclose(
+        np.linalg.norm(vector), 1.0, atol=1e-5
     )
 
-    bug = Preprocessor.process(bug)
 
-    embedder = TextEmbedder()
+def test_query_prefix_is_applied_and_document_prefix_is_not(embedder):
+    """BGE is asymmetric: only the query side carries the instruction prefix."""
+    query = "login crash"
 
-    embedding = embedder.encode(bug.description)
+    from_encode_query = embedder.encode_query(query)
+    manually_prefixed = embedder.encode_documents([BGE_QUERY_PREFIX + query])[0]
+    unprefixed = embedder.encode_documents([query])[0]
 
-    print("Bug ID:")
-    print(bug.bug_id)
-
-    print("\nClean Description:")
-    print(bug.description)
-
-    print("\nClean Error Log:")
-    print(bug.error_log)
-
-    print("\nEmbedding Shape:")
-    print(embedding.shape)
-
-    print("\nFirst 10 Values:")
-    print(embedding[:10])
-
-if __name__ == "__main__":
-    main()
+    assert np.allclose(from_encode_query, manually_prefixed, atol=1e-5)
+    assert not np.allclose(from_encode_query, unprefixed, atol=1e-5)

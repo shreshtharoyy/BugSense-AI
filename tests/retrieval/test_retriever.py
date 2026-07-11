@@ -1,47 +1,96 @@
+from datetime import datetime
+
+import pytest
+
 from src.bug_factory import BugFactory
-from src.preprocessing.preprocessor import Preprocessor
-from src.embeddings.text_embedder import TextEmbedder
-from src.storage.chroma_store import ChromaStore
+from src.document_builder import build_retrieval_text
+from src.indexing.indexing_pipeline import IndexingPipeline
 from src.retrieval.retriever import Retriever
 
+CORPUS = [
+    ("BUG-1", "Address bar does not elide origins", "The URL bar shows the origin elided from the right."),
+    ("BUG-2", "PDF viewer crash", "TypeError: info.PDFFormatVersion is undefined when the header is invalid."),
+    ("BUG-3", "Bookmark sync fails", "Sync of bookmarks stops after signing in."),
+]
 
-def main():
-    store = ChromaStore()
-    embedder = TextEmbedder()
-    retriever = Retriever(store)
-    
-    query_bug = BugFactory.create(
-        title="Login Crash",
-        description="The application crashes when attempting to log in with valid credentials.",
-        error_log="NS_ERROR_FAILURE",
-        screenshot_path=None,
+
+@pytest.fixture
+def indexed_store(store, embedder):
+    bugs = [
+        BugFactory.create(
+            bug_id=bug_id,
+            title=title,
+            description=description,
+            error_log="",
+            created_at=datetime(2020, 1, 1),
+            project="firefox",
+        )
+        for bug_id, title, description in CORPUS
+    ]
+    IndexingPipeline(embedder=embedder, store=store).index(iter(bugs))
+    return store
+
+
+def test_indexes_every_bug(indexed_store):
+    assert indexed_store.count() == 3
+
+
+def test_skips_bugs_with_no_title_and_no_description(store, embedder):
+    bugs = [
+        BugFactory.create(bug_id="GOOD", title="real bug", description="d", error_log=""),
+        BugFactory.create(bug_id="EMPTY", title="", description="", error_log=""),
+    ]
+    indexed = IndexingPipeline(embedder=embedder, store=store).index(iter(bugs))
+
+    assert indexed == 1
+    assert store.count() == 1
+
+
+def test_exact_text_retrieves_its_own_bug_first(indexed_store, embedder):
+    retriever = Retriever(indexed_store, embedder=embedder)
+    target = BugFactory.create(
+        bug_id="BUG-2", title=CORPUS[1][1], description=CORPUS[1][2], error_log=""
     )
-    
-    query_bug = Preprocessor.process(query_bug)
-    query_text = f"""Title: {query_bug.title}. Description: {query_bug.description}. Error Log: {query_bug.error_log}""".strip()
-    query_embedding = embedder.encode(query_text)
-    
-    results = retriever.retrieve(query_embedding, top_k=5)
-    
-    print(f"Query {query_text} \n")
-    ids = results.get("ids", [[]])[0]
-    documents = results.get("documents", [[]])[0]
-    metadatas = results.get("metadatas", [[]])[0]
-    distances = results.get("distances", [[]])[0]
 
-    for i, (bug_id, doc, meta, distance) in enumerate(zip(ids, documents, metadatas, distances),start=1,):
-        similarity = 1 - distance
-        print(f"Rank       : {i}")
-        print(f"Bug ID     : {bug_id}")
-        # print(f"Distance   : {distance:.4f}")
-        print(f"Similarity : {similarity:.2%}")
-        print(f"Project    : {meta.get('project')}")
-        print(f"Title      : {meta.get('title')}")
-        print(f"Resolution : {meta.get('resolution')}")
-        print(f"Created At : {meta.get('created_at')}")
-        print(f"Resolved At: {meta.get('resolved_at')} \n")
-        print("Retrieved Document")
-        print(f"{doc}\n")
+    results = retriever.retrieve(build_retrieval_text(target), top_k=3)
 
-if __name__ == "__main__":
-    main()
+    assert results[0].bug_id == "BUG-2"
+    assert results[0].similarity > 0.9
+
+
+def test_similarity_is_a_real_cosine_never_negative(indexed_store, embedder):
+    retriever = Retriever(indexed_store, embedder=embedder)
+    # min_similarity=-1 so nothing is filtered and we see every raw score.
+    results = retriever.retrieve("url bar truncates domain", top_k=3, min_similarity=-1.0)
+
+    assert len(results) == 3
+    for result in results:
+        assert -1.0 <= result.similarity <= 1.0
+    # Under the old l2 space, unrelated hits scored near zero or negative.
+    assert results[0].similarity > 0.5
+
+
+def test_exclude_ids_removes_the_query_bug(indexed_store, embedder):
+    retriever = Retriever(indexed_store, embedder=embedder)
+    query = build_retrieval_text(
+        BugFactory.create(bug_id="x", title=CORPUS[1][1], description=CORPUS[1][2], error_log="")
+    )
+
+    results = retriever.retrieve(query, top_k=2, exclude_ids=["BUG-2"], min_similarity=-1.0)
+
+    assert "BUG-2" not in [result.bug_id for result in results]
+    assert len(results) == 2
+
+
+def test_min_similarity_filters_weak_matches(indexed_store, embedder):
+    retriever = Retriever(indexed_store, embedder=embedder)
+    assert retriever.retrieve("quantum chromodynamics lattice gauge", min_similarity=0.95) == []
+
+
+def test_metadata_round_trips_through_retrieval(indexed_store, embedder):
+    retriever = Retriever(indexed_store, embedder=embedder)
+    result = retriever.retrieve("bookmark sync", top_k=1, min_similarity=-1.0)[0]
+
+    assert result.project == "firefox"
+    assert result.created_at == "2020-01-01T00:00:00"
+    assert result.title
