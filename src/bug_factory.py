@@ -15,8 +15,10 @@ class BugFactory:
         resolved_at: datetime | None = None,
         resolution: str | None = None,
         project: str = "",
+        status: str = "",
+        priority: str = "",
     ) -> BugReport:
-        
+
         if bug_id is None:
             bug_id = f"BUG-{uuid4().hex[:8].upper()}"
 
@@ -32,5 +34,7 @@ class BugFactory:
             title=title,
             project=project,
             resolution=resolution,
-            resolved_at=resolved_at
+            resolved_at=resolved_at,
+            status=status,
+            priority=priority,
         )
