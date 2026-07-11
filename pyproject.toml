@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bugsense-ai"
+version = "0.1.0"
+description = "Multimodal bug triage: retrieval, duplicate detection, and reasoning over historical bug reports."
+requires-python = ">=3.11"
+dependencies = [
+    "chromadb==1.5.9",
+    "sentence-transformers==5.6.0",
+    "torch",
+    "transformers",
+    "numpy",
+    "pandas",
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+data = ["kaggle"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# `src` is a real package here, not a src-layout root. Without this, type checkers
+# infer src-layout from the directory name and fail to resolve `src.*` imports.
+[tool.ty.environment]
+root = ["."]
+
+[tool.pyright]
+extraPaths = ["."]

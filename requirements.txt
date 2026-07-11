@@ -1,10 +1,16 @@
-fastapi
-uvicorn
-pydantic
-torch
+# GPU (CUDA 12.6) build of torch. The +cu126 local version exists only on the
+# PyTorch index, so --extra-index-url pulls it there while everything else stays
+# on PyPI. On a machine with no NVIDIA GPU, replace the line with plain `torch`.
+--extra-index-url https://download.pytorch.org/whl/cu126
+
+chromadb==1.5.9
+sentence-transformers==5.6.0
+torch==2.13.0+cu126
 transformers
 numpy
 pandas
-sentence-transformers
-chromadb
+fastapi
+uvicorn
+pydantic
 kaggle
+pytest>=8.0

@@ -6,6 +6,11 @@ venv/
 __pycache__/
 *.py[cod]
 
+# Packaging artifacts
+*.egg-info/
+build/
+dist/
+
 # IDE
 .vscode/
 .idea/
@@ -25,3 +30,9 @@ temp/
 
 # Downloaded datasets
 dataset/gitbugs/
+
+# Vector store (rebuildable from dataset/)
+data/
+
+# Evaluation output
+eval_results/
