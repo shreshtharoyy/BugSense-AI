@@ -94,3 +94,58 @@ def test_metadata_round_trips_through_retrieval(indexed_store, embedder):
     assert result.project == "firefox"
     assert result.created_at == "2020-01-01T00:00:00"
     assert result.title
+
+
+class _StubReranker:
+    """Records the pool it was handed and reverses it, so the test can prove both that
+    the reranker receives the dense candidates and that its order is what comes back.
+    Avoids downloading a real cross-encoder in unit tests."""
+
+    def __init__(self):
+        self.received: list | None = None
+
+    def rerank(self, query_text, candidates, top_k):
+        self.received = candidates
+        return list(reversed(candidates))[:top_k]
+
+
+def test_reranker_receives_dense_pool_and_owns_final_order(indexed_store, embedder):
+    dense = Retriever(indexed_store, embedder=embedder).retrieve(
+        "url bar truncates domain", top_k=3, min_similarity=-1.0
+    )
+
+    stub = _StubReranker()
+    reranked = Retriever(
+        indexed_store, embedder=embedder, reranker=stub, rerank_pool=50
+    ).retrieve("url bar truncates domain", top_k=3, min_similarity=-1.0)
+
+    # The reranker saw the dense candidates...
+    assert stub.received is not None
+    assert [bug.bug_id for bug in stub.received] == [bug.bug_id for bug in dense]
+    # ...and the returned order is the reranker's, not the dense order.
+    assert [bug.bug_id for bug in reranked] == [bug.bug_id for bug in reversed(dense)]
+
+
+def _bm25_over(store):
+    from src.retrieval.bm25_index import BM25Index
+
+    got = store.collection.get(include=["documents"])
+    return BM25Index.from_documents(got["ids"], got["documents"])
+
+
+def test_hybrid_returns_rrf_scored_rows(indexed_store, embedder):
+    retriever = Retriever(indexed_store, embedder=embedder, bm25=_bm25_over(indexed_store))
+
+    results = retriever.retrieve("url bar truncates domain", top_k=2)
+
+    assert len(results) == 2
+    # Hybrid rows carry an RRF score; dense-only rows would not.
+    assert all(result.rrf_score is not None for result in results)
+
+
+def test_hybrid_excludes_query_bug(indexed_store, embedder):
+    retriever = Retriever(indexed_store, embedder=embedder, bm25=_bm25_over(indexed_store))
+
+    results = retriever.retrieve("bookmark sync", top_k=3, exclude_ids=["BUG-3"])
+
+    assert "BUG-3" not in [result.bug_id for result in results]
