@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.config import RERANKER_MODEL, RRF_BM25_WEIGHT
 from src.retrieval.retriever import Retriever
 from src.storage.chroma_store import ChromaStore
 
@@ -47,12 +48,28 @@ def fetch_documents(store: ChromaStore, ids: list[str]) -> dict[str, str]:
     return documents
 
 
-def evaluate(limit: int | None) -> dict:
+def evaluate(limit: int | None, method: str, bm25_weight: float) -> dict:
     store = ChromaStore()
     if store.count() == 0:
         raise SystemExit("Collection is empty. Run scripts/build_vector_index.py --reset")
 
-    retriever = Retriever(store)
+    reranker = None
+    bm25 = None
+    if method == "reranked":
+        # Imported lazily so a baseline run never loads the cross-encoder.
+        from src.reranking.reranker import CrossEncoderReranker
+
+        reranker = CrossEncoderReranker()
+        print(f"Reranking with {RERANKER_MODEL}")
+    elif method == "hybrid":
+        # Imported lazily so a baseline run never pulls in bm25s.
+        from src.retrieval.bm25_index import BM25Index
+
+        corpus = store.collection.get(include=["documents"])
+        bm25 = BM25Index.from_documents(corpus["ids"], corpus["documents"] or [])
+        print(f"Hybrid dense + BM25 over {len(bm25)} documents (bm25_weight={bm25_weight})")
+
+    retriever = Retriever(store, reranker=reranker, bm25=bm25, bm25_weight=bm25_weight)
     corpus_ids = set(store.collection.get(include=[])["ids"])
 
     pairs = load_pairs(DUPLICATES_CSV, corpus_ids)
@@ -97,6 +114,8 @@ def evaluate(limit: int | None) -> dict:
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "corpus_size": store.count(),
         "pairs_evaluated": evaluated,
+        "method": method,
+        **({"bm25_weight": bm25_weight} if method == "hybrid" else {}),
         **{f"recall@{rank}": hits[rank] / evaluated for rank in RANKS},
         "mrr": sum(reciprocal_ranks) / evaluated,
     }
@@ -110,18 +129,42 @@ def main() -> None:
         default=0,
         help="Evaluate only the first N pairs. 0 evaluates all of them.",
     )
+    stage = parser.add_mutually_exclusive_group()
+    stage.add_argument(
+        "--rerank",
+        action="store_true",
+        help="Add the cross-encoder second stage. Compare against a plain run over the "
+        "same pairs to measure its effect.",
+    )
+    stage.add_argument(
+        "--hybrid",
+        action="store_true",
+        help="Fuse dense + BM25 with RRF. Compare against a plain run over the same "
+        "pairs to measure the effect.",
+    )
+    parser.add_argument(
+        "--bm25-weight",
+        type=float,
+        default=RRF_BM25_WEIGHT,
+        help="Weight on the BM25 side of the RRF fusion (dense is 1.0). Only used with "
+        f"--hybrid. Default {RRF_BM25_WEIGHT}. Sweep to tune.",
+    )
     args = parser.parse_args()
 
-    metrics = evaluate(limit=args.limit or None)
+    method = "reranked" if args.rerank else "hybrid" if args.hybrid else "baseline"
+    metrics = evaluate(
+        limit=args.limit or None, method=method, bm25_weight=args.bm25_weight
+    )
 
-    print("\n=== Duplicate detection baseline ===")
+    heading = method
+    print(f"\n=== Duplicate detection ({heading}) ===")
     for key, value in metrics.items():
         formatted = f"{value:.4f}" if isinstance(value, float) else value
         print(f"{key:18s} {formatted}")
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     stamp = metrics["timestamp"].replace(":", "-")
-    output_path = OUTPUT_DIR / f"retrieval_{stamp}.json"
+    output_path = OUTPUT_DIR / f"retrieval_{heading}_{stamp}.json"
     output_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(f"\nWrote {output_path}")
 
