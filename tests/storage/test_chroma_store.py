@@ -37,7 +37,7 @@ def test_add_batch_serializes_datetime_and_path(store, bug):
     # Chroma raises ValueError on a raw datetime or Path in metadata.
     store.add_batch(bugs=[bug], embeddings=np.zeros((1, 4)), documents=["doc"])
 
-    stored = store.collection.get(ids=["BUG-1"])
+    stored = store.collection.get(ids=["BUG-1::0"])
     metadata = stored["metadatas"][0]
 
     assert metadata["created_at"] == "2020-01-01T05:10:54"
@@ -45,6 +45,8 @@ def test_add_batch_serializes_datetime_and_path(store, bug):
     assert metadata["screenshot_path"] == str(Path("shots/login.png"))
     assert metadata["status"] == "RESOLVED"
     assert metadata["priority"] == "P1"
+    assert metadata["parent_bug_id"] == "BUG-1"
+    assert metadata["chunk_index"] == 0
     assert stored["documents"][0] == "doc"
 
 
@@ -58,7 +60,7 @@ def test_absent_optional_metadata_is_omitted_not_blank(store):
     )
     store.add_batch(bugs=[bug], embeddings=np.zeros((1, 4)), documents=["doc"])
 
-    metadata = store.collection.get(ids=["BUG-2"])["metadatas"][0]
+    metadata = store.collection.get(ids=["BUG-2::0"])["metadatas"][0]
     assert "resolved_at" not in metadata
     assert "resolution" not in metadata
     assert "screenshot_path" not in metadata
@@ -68,6 +70,18 @@ def test_add_batch_is_idempotent(store, bug):
     for _ in range(2):
         store.add_batch(bugs=[bug], embeddings=np.zeros((1, 4)), documents=["doc"])
     assert store.count() == 1
+
+
+def test_add_batch_writes_multiple_chunks_for_one_parent(store, bug):
+    store.add_batch(
+        bugs=[bug, bug],
+        embeddings=np.zeros((2, 4)),
+        documents=["chunk-a", "chunk-b"],
+        chunk_indices=[0, 1],
+    )
+    assert store.count() == 2
+    assert store.existing_parent_ids() == {"BUG-1"}
+    assert set(store.existing_ids()) == {"BUG-1::0", "BUG-1::1"}
 
 
 def test_reset_empties_the_collection(store, bug):

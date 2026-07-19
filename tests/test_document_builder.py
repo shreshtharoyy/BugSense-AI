@@ -12,7 +12,7 @@ def test_error_log_precedes_description(bug):
 
 def test_fields_are_truncated_to_their_budgets():
     bug = BugFactory.create(
-        title="t", description="d" * 5000, error_log="e" * 5000
+        title="t", description="d" * 10000, error_log="e" * 5000
     )
     text = build_retrieval_text(bug)
 

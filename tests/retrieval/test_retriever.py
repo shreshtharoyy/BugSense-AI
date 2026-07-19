@@ -32,7 +32,28 @@ def indexed_store(store, embedder):
 
 
 def test_indexes_every_bug(indexed_store):
+    assert indexed_store.existing_parent_ids() == {"BUG-1", "BUG-2", "BUG-3"}
+    # Short corpus bugs are one chunk each.
     assert indexed_store.count() == 3
+
+
+def test_indexes_long_bug_as_multiple_chunks(store, embedder):
+    bugs = [
+        BugFactory.create(
+            bug_id="LONG",
+            title="Overflow",
+            description=("layout assert " * 400),
+            error_log="NS_ERROR_FAILURE",
+            created_at=datetime(2020, 1, 1),
+            project="firefox",
+        )
+    ]
+    indexed = IndexingPipeline(embedder=embedder, store=store).index(iter(bugs))
+
+    assert indexed == 1
+    assert store.existing_parent_ids() == {"LONG"}
+    assert store.count() > 1
+    assert all(chunk_id.startswith("LONG::") for chunk_id in store.existing_ids())
 
 
 def test_skips_bugs_with_no_title_and_no_description(store, embedder):
@@ -44,6 +65,7 @@ def test_skips_bugs_with_no_title_and_no_description(store, embedder):
 
     assert indexed == 1
     assert store.count() == 1
+    assert store.existing_parent_ids() == {"GOOD"}
 
 
 def test_exact_text_retrieves_its_own_bug_first(indexed_store, embedder):

@@ -4,14 +4,15 @@ from src.config import BGE_QUERY_PREFIX
 
 
 def test_encode_documents_returns_matrix(embedder):
+    dim = embedder.model.get_embedding_dimension()
     embeddings = embedder.encode_documents(["first bug", "second bug"])
-    assert embeddings.shape == (2, 384)
+    assert embeddings.shape == (2, dim)
 
 
 def test_encode_query_returns_vector(embedder):
-    # The old encode() returned (384,) for a str and (N, 384) for a list; callers
-    # silently depended on which they passed.
-    assert embedder.encode_query("login crash").shape == (384,)
+    # encode_query always returns (dim,), never (1, dim) — callers depend on that.
+    dim = embedder.model.get_embedding_dimension()
+    assert embedder.encode_query("login crash").shape == (dim,)
 
 
 def test_embeddings_are_normalized(embedder):
