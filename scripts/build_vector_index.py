@@ -70,7 +70,7 @@ def main() -> None:
 
     pipeline = IndexingPipeline(store=store)
 
-    already_indexed = store.existing_ids() if args.resume else None
+    already_indexed = store.existing_parent_ids() if args.resume else None
     if already_indexed:
         print(f"Resuming: {len(already_indexed)} bugs already indexed")
 

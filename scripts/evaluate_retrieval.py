@@ -8,11 +8,13 @@ before it. This script turns that into Recall@k and MRR.
 
 import argparse
 import json
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
+from src.chunking import parent_id_from_chunk_id
 from src.config import RERANKER_MODEL, RRF_BM25_WEIGHT
 from src.retrieval.retriever import Retriever
 from src.storage.chroma_store import ChromaStore
@@ -38,13 +40,52 @@ def load_pairs(csv_path: Path, corpus_ids: set[str]) -> list[tuple[str, str]]:
     return pairs
 
 
-def fetch_documents(store: ChromaStore, ids: list[str]) -> dict[str, str]:
+# SQLite (Chroma's backing store) rejects a single get() over tens of thousands of
+# rows with "too many SQL variables". Page by id in batches of this size.
+_GET_BATCH = 500
+
+
+def _iter_collection(store: ChromaStore, include: list[str]):
+    """Yield (ids, documents|None, metadatas|None) pages from the collection."""
+    all_ids = store.collection.get(include=[])["ids"]
+    for start in range(0, len(all_ids), _GET_BATCH):
+        batch_ids = all_ids[start : start + _GET_BATCH]
+        page = store.collection.get(ids=batch_ids, include=include)
+        yield (
+            page["ids"],
+            page.get("documents"),
+            page.get("metadatas"),
+        )
+
+
+def fetch_parent_documents(store: ChromaStore) -> dict[str, str]:
+    """Rebuild one query string per parent by joining chunks in chunk_index order.
+
+    Eval queries used to be a single stored document. With chunking, the body lives
+    across rows; concatenating restores the long description for encode_query.
+    """
+    by_parent: dict[str, list[tuple[int, str]]] = defaultdict(list)
+
+    for ids, documents, metadatas in _iter_collection(
+        store, include=["documents", "metadatas"]
+    ):
+        for chunk_id, document, metadata in zip(
+            ids, documents or [], metadatas or []
+        ):
+            metadata = metadata or {}
+            parent = str(
+                metadata.get("parent_bug_id") or parent_id_from_chunk_id(chunk_id)
+            )
+            index = int(metadata.get("chunk_index", 0))
+            by_parent[parent].append((index, document or ""))
+
     documents: dict[str, str] = {}
-    for start in range(0, len(ids), 500):
-        chunk = ids[start : start + 500]
-        result = store.collection.get(ids=chunk, include=["documents"])
-        for bug_id, document in zip(result["ids"], result["documents"] or []):
-            documents[bug_id] = document or ""
+    for parent, pieces in by_parent.items():
+        pieces.sort(key=lambda item: item[0])
+        if len(pieces) == 1:
+            documents[parent] = pieces[0][1]
+            continue
+        documents[parent] = "\n".join(text for _, text in pieces)
     return documents
 
 
@@ -65,12 +106,16 @@ def evaluate(limit: int | None, method: str, bm25_weight: float) -> dict:
         # Imported lazily so a baseline run never pulls in bm25s.
         from src.retrieval.bm25_index import BM25Index
 
-        corpus = store.collection.get(include=["documents"])
-        bm25 = BM25Index.from_documents(corpus["ids"], corpus["documents"] or [])
+        corpus_ids: list[str] = []
+        corpus_docs: list[str] = []
+        for ids, documents, _ in _iter_collection(store, include=["documents"]):
+            corpus_ids.extend(ids)
+            corpus_docs.extend(documents or [""] * len(ids))
+        bm25 = BM25Index.from_documents(corpus_ids, corpus_docs)
         print(f"Hybrid dense + BM25 over {len(bm25)} documents (bm25_weight={bm25_weight})")
 
     retriever = Retriever(store, reranker=reranker, bm25=bm25, bm25_weight=bm25_weight)
-    corpus_ids = set(store.collection.get(include=[])["ids"])
+    corpus_ids = store.existing_parent_ids()
 
     pairs = load_pairs(DUPLICATES_CSV, corpus_ids)
     print(f"Usable duplicate pairs (both bugs indexed): {len(pairs)}")
@@ -78,7 +123,7 @@ def evaluate(limit: int | None, method: str, bm25_weight: float) -> dict:
         pairs = pairs[:limit]
         print(f"Evaluating a sample of {len(pairs)}")
 
-    query_documents = fetch_documents(store, [query_id for query_id, _ in pairs])
+    query_documents = fetch_parent_documents(store)
 
     hits = {rank: 0 for rank in RANKS}
     reciprocal_ranks = []
@@ -113,6 +158,7 @@ def evaluate(limit: int | None, method: str, bm25_weight: float) -> dict:
     return {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "corpus_size": store.count(),
+        "parent_bugs": len(corpus_ids),
         "pairs_evaluated": evaluated,
         "method": method,
         **({"bm25_weight": bm25_weight} if method == "hybrid" else {}),
