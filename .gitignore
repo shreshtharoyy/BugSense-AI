@@ -36,3 +36,7 @@ data/
 
 # Evaluation output
 eval_results/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/.next/
