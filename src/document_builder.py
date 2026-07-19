@@ -10,8 +10,8 @@ def build_retrieval_text(bug: BugReport) -> str:
     space than the documents they were meant to match.
 
     Error Log precedes Description because the embedding model truncates the tail at
-    512 tokens without warning, and roughly a third of these documents exceed that.
-    The error signature is the shortest, highest-signal field, so it goes first.
+    512 tokens without warning when a document is not chunked. Chunking recovers the
+    lost tail; field order still puts the shortest, highest-signal field first.
     """
     error_log = (bug.error_log or "")[:MAX_ERROR_LOG_LENGTH]
     description = (bug.description or "")[:MAX_DESCRIPTION_LENGTH]

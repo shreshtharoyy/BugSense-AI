@@ -10,6 +10,11 @@ class TextEmbedder:
     ) -> None:
         self.model = SentenceTransformer(model_name, device=device)
 
+    @property
+    def tokenizer(self):
+        """Hugging Face tokenizer used for embedding-aware chunk windows."""
+        return self.model.tokenizer
+
     def encode_documents(
         self, texts: list[str], batch_size: int = BATCH_SIZE
     ) -> np.ndarray:

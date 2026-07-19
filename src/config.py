@@ -36,15 +36,25 @@ RRF_K = 60
 # cases, not as an equal partner. 0.3 is the tuned optimum.
 RRF_BM25_WEIGHT = 0.3
 
-# Hard limit of BAAI/bge-small-en-v1.5. Text past this is dropped silently.
+# Hard limit of BAAI/bge-*-en-v1.5 (small/base/large). Text past this is dropped silently
+# unless chunking splits it first.
 MAX_SEQ_TOKENS = 512
 
-BATCH_SIZE = 16
+# Token windows for embedding chunking. Keep under MAX_SEQ_TOKENS. Error Log lives
+# only on chunk 0 so later windows keep a large description budget. Cap prevents the
+# ~28-vectors/bug explosion seen with a repeated long Error Log prefix.
+CHUNK_TOKENS = 480
+CHUNK_OVERLAP = 48
+MAX_CHUNKS_PER_BUG = 4
+# Dense/hybrid over-fetch chunks by this factor before collapsing to unique parents.
+CHUNK_OVERFETCH = 4
+
+BATCH_SIZE = 32
 
 TOP_K = 5
 SIMILARITY_THRESHOLD = 0.60
 
-# Character guards, not token guards: 2000 chars is roughly 500 tokens, so these
-# narrow the input but cannot by themselves keep a document under MAX_SEQ_TOKENS.
-MAX_DESCRIPTION_LENGTH = 2000
+# Character guard on Description. Chunking recovers past 512 tokens; this still
+# bounds pathological rows so a single bug cannot flood the index.
+MAX_DESCRIPTION_LENGTH = 4000
 MAX_ERROR_LOG_LENGTH = 1000

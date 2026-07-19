@@ -4,6 +4,7 @@ from chromadb.api.collection_configuration import CreateCollectionConfiguration
 from chromadb.api.types import Metadata
 import numpy as np
 from src.bug_report import BugReport
+from src.chunking import chunk_id, parent_id_from_chunk_id
 from src.config import CHROMA_PATH, COLLECTION_NAME
 
 
@@ -69,8 +70,18 @@ class ChromaStore:
     def existing_ids(self) -> set[str]:
         return set(self.collection.get(include=[])["ids"])
 
+    def existing_parent_ids(self) -> set[str]:
+        """Parent bug IDs already represented by at least one chunk vector.
+
+        Resume skips whole bugs, not individual chunk keys.
+        """
+        return {
+            parent_id_from_chunk_id(chunk_id_str)
+            for chunk_id_str in self.existing_ids()
+        }
+
     @staticmethod
-    def _build_metadata(bug: BugReport) -> Metadata:
+    def _build_metadata(bug: BugReport, chunk_index: int) -> Metadata:
         # Chroma accepts only str/int/float/bool/None. A datetime or a Path raises
         # ValueError, so both are serialized here. Absent values are dropped rather than
         # coerced to "", so a missing field stays distinguishable from an empty one.
@@ -83,14 +94,38 @@ class ChromaStore:
             "created_at": bug.created_at.isoformat() if bug.created_at else None,
             "resolved_at": bug.resolved_at.isoformat() if bug.resolved_at else None,
             "screenshot_path": str(bug.screenshot_path) if bug.screenshot_path else None,
+            "parent_bug_id": bug.bug_id,
+            "chunk_index": chunk_index,
         }
         return {key: value for key, value in metadata.items() if value is not None}
 
     def add_batch(
-        self, bugs: list[BugReport], embeddings: np.ndarray, documents: list[str]
+        self,
+        bugs: list[BugReport],
+        embeddings: np.ndarray,
+        documents: list[str],
+        chunk_indices: list[int] | None = None,
     ) -> None:
-        ids = [bug.bug_id for bug in bugs]
-        metadata_list = [self._build_metadata(bug) for bug in bugs]
+        """Upsert one vector per list entry. Each entry is a chunk of its parent bug.
+
+        `chunk_indices` defaults to 0 for every row (single-chunk bugs / simple tests).
+        Chroma IDs are `{bug_id}::{chunk_index}` so parents can map to many vectors.
+        """
+        if chunk_indices is None:
+            chunk_indices = [0] * len(bugs)
+        if not (len(bugs) == len(documents) == len(chunk_indices) == len(embeddings)):
+            raise ValueError(
+                "bugs, documents, chunk_indices, and embeddings must have the same length"
+            )
+
+        ids = [
+            chunk_id(bug.bug_id, index)
+            for bug, index in zip(bugs, chunk_indices)
+        ]
+        metadata_list = [
+            self._build_metadata(bug, index)
+            for bug, index in zip(bugs, chunk_indices)
+        ]
         embedding_list = [embedding.tolist() for embedding in embeddings]
 
         # upsert, not add: re-indexing must be idempotent rather than collide on ids.
